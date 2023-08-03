@@ -9,9 +9,15 @@ class TagSerializer(serializers.ModelSerializer):
 
 class PostSerializer(serializers.ModelSerializer):
     image = serializers.ImageField(use_url = True, required = False)
+    writer = serializers.SerializerMethodField()
     comments = serializers.SerializerMethodField()
     tag = serializers.SerializerMethodField()
-    like = serializers.SerializerMethodField()
+    like_cnt = serializers.IntegerField(required = False)
+    dislike_cnt = serializers.IntegerField(required = False)
+    comment_cnt = serializers.IntegerField(required = False)
+
+    def get_writer(self, instance):
+        return instance.writer.username
 
     def get_comments(self, instance):
         serializer = CommentSerializer(instance.comments, many = True)
@@ -21,30 +27,31 @@ class PostSerializer(serializers.ModelSerializer):
         tags = instance.tag.all()
         return [tag.name for tag in tags]
     
-    def get_like(self, instance):
-        likes = instance.like.all()
-        return [like.username for like in likes]
-    
     class Meta:
         model = Post
         fields = '__all__'
         read_only_fields = [
             'id',
+            'writer',
+            'like_cnt',
+            'dislike_cnt',
+            'comment_cnt',
             'created_at',
             'updated_at',
             'comments',
-            'like',
-            'like_cnt',
             'like',
         ]
 
 class PostListSerializer(serializers.ModelSerializer):
     image = serializers.ImageField(use_url = True, required = False)
-    comments_cnt = serializers.SerializerMethodField()
+    writer = serializers.SerializerMethodField()
     tag = serializers.SerializerMethodField()
+    like_cnt = serializers.IntegerField(required = False)
+    dislike_cnt = serializers.IntegerField(required = False)
+    comment_cnt = serializers.IntegerField(required = False)
 
-    def get_comments_cnt(self, instance):
-        return instance.comments.count()
+    def get_writer(self, instance):
+        return instance.writer.username
     
     def get_tag(self, instance):
         tags = instance.tag.all()
@@ -57,19 +64,21 @@ class PostListSerializer(serializers.ModelSerializer):
             'title',
             'writer',
             'content',
+            'like_cnt',
+            'dislike_cnt',
+            'comment_cnt',
             'created_at',
             'updated_at',
             'image',
             'tag',
-            'comments_cnt',
-            'like_cnt',
         ]
         read_only_fields = [
             'id',
+            'like_cnt',
+            'dislike_cnt',
+            'comment_cnt',
             'created_at',
             'updated_at',
-            'comments_cnt',
-            'like_cnt',
         ]
 
 class CommentSerializer(serializers.ModelSerializer):

@@ -1,47 +1,78 @@
 from rest_framework.response import Response
 from rest_framework import generics, viewsets, mixins
-from rest_framework.permissions import IsAuthenticatedOrReadOnly
+from rest_framework.permissions import IsAuthenticatedOrReadOnly, IsAuthenticated
 from rest_framework.decorators import action
+from rest_framework.filters import SearchFilter, OrderingFilter
+from django_filters.rest_framework import DjangoFilterBackend
+from django.db.models import Q, Count
 
 from .serializers import PostSerializer, CommentSerializer, TagSerializer, PostListSerializer
-from .models import Post, Comment, Tag
+from .models import Post, PostReaction, Comment, Tag
 from .permissions import IsOwnerOrReadOnly
+from .paginations import PostPagination
 
 from django.shortcuts import get_object_or_404
 
 # Create your views here.
 class PostViewSet(viewsets.ModelViewSet):
-    queryset = Post.objects.all()
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    queryset = Post.objects.annotate(
+        like_cnt = Count(
+            'reactions', filter = Q(reactions__reaction = 'like'), distinct = True
+        ),
+        dislike_cnt = Count(
+            'reactions', filter = Q(reactions__reaction = 'dislike'), distinct = True
+        ),
+        comment_cnt = Count('comments'),
+    )
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['writer']
+    search_fields = ['title', '=tag__name']
+    ordering_fields = ['created_at']
+    pagination_class = PostPagination
     
     def get_serializer_class(self):
         if self.action == 'list':
             return PostListSerializer
         return PostSerializer
     
-    @action(methods = ['GET'], detail = True)
-    def like(self, request, pk = None):
-        post = self.get_object()
-        if request.user in post.like.all():
-            post.like.remove(request.user)
-            post.like_cnt -= 1
-            post.save()
+    def get_permissions(self):
+        if self.action in ['update', 'destroy', 'partial_update']:
+            return [IsOwnerOrReadOnly()]
+        elif self.action in ['likes']:
+            return [IsAuthenticated()]
         else:
-            post.like.add(request.user)
-            post.like_cnt += 1
-            post.save()
+            return []
+    
+    @action(methods = ['POST'], detail = True)
+    def likes(self, request, pk = None):
+        post = self.get_object()
+        if PostReaction.objects.filter(post = post, user = request.user, reaction = 'like'):
+            reaction = post.reactions.get(reaction = 'like', user = request.user)
+            reaction.delete()
+        else:
+            PostReaction.objects.create(post = post, user = request.user, reaction = 'like')
+        return Response()
+    
+    @action(methods = ['POST'], detail = True)
+    def dislikes(self, request, pk = None):
+        post = self.get_object()
+        if PostReaction.objects.filter(post = post, user = request.user, reaction = 'dislike'):
+            reaction = post.reactions.get(reaction = 'dislike', user = request.user)
+            reaction.delete()
+        else:
+            PostReaction.objects.create(post = post, user = request.user, reaction = 'dislike')
         return Response()
 
     @action(methods = ['GET'], detail = False)
-    def recommend(self, request):
-        movies = self.get_queryset().order_by('-like_cnt')[:3]
+    def top5(self, request):
+        movies = self.get_queryset().order_by('-like_cnt')[:5]
         serializer = PostListSerializer(movies, many = True)
         return Response(serializer.data)
 
     def create(self, request):
         serializer = self.get_serializer(data = request.data)
         serializer.is_valid(raise_exception = True)
-        self.perform_create(serializer)
+        serializer.save(writer = request.user)
 
         post = serializer.instance
         self.handle_tags(post)
@@ -89,7 +120,7 @@ class PostCommentViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixins.
         post = get_object_or_404(Post, pk = post_id)
         serializer = self.get_serializer(data = request.data)
         serializer.is_valid(raise_exception = True)
-        serializer.save(post = post)
+        serializer.save(post = post, writer = request.user)
         return Response(serializer.data)
     
 class TagViewSet(viewsets.GenericViewSet, mixins.RetrieveModelMixin):
